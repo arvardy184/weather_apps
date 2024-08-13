@@ -1,125 +1,332 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
+import 'package:lottie/lottie.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:google_fonts/google_fonts.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(WeatherApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  // This widget is the root of your application.
+class WeatherApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
+    return GetMaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Weather App - Arvan',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a blue toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
+        fontFamily: GoogleFonts.openSans().fontFamily,
+        primarySwatch: Colors.blue,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: WeatherHomePage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class WeatherController extends GetxController {
+  var selectedProvince = 'dki-jakarta'.obs;
+  var selectedCity = 'Jakarta Pusat'.obs;
+  var provinces = <String>[].obs;
+  var cities = <String>[].obs;
+  var isLoadingCities = false.obs;
+  var weatherData = Rx<Map<String, dynamic>>({});
+  var isLoadingWeather = false.obs;
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  void onInit() {
+    super.onInit();
+    loadPreferences();
+    fetchProvinces();
+  }
+
+  Future<void> loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    selectedProvince.value =
+        prefs.getString('selectedProvince') ?? 'jawa-barat';
+    selectedCity.value = prefs.getString('selectedCity') ?? 'bandung';
+    fetchCities();
+  }
+
+  Future<void> savePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('selectedProvince', selectedProvince.value);
+    await prefs.setString('selectedCity', selectedCity.value);
+  }
+
+  Future<void> fetchProvinces() async {
+    final String response = await rootBundle.loadString('assets/provinsi.txt');
+    provinces.value = response.split('\n').map((line) => line.trim()).toList();
+    print(provinces);
+  }
+
+Future<void> fetchCities() async {
+  isLoadingCities.value = true;
+  final response = await http.get(Uri.parse(
+      'https://cuaca-gempa-rest-api.vercel.app/weather/${selectedProvince.value.toLowerCase().replaceAll(' ', '-')}'));
+
+  if (response.statusCode == 200) {
+    final data = json.decode(response.body);
+    final areas = data['data']['areas'];
+    List<String> cityList =
+        areas.map<String>((area) => area['description'].toString()).toList();
+
+    cities.value = cityList;
+    if (cities.isNotEmpty && !cities.contains(selectedCity.value)) {
+      selectedCity.value = cities.first;
+    }
+  } else {
+    print('Failed to fetch cities, status code: ${response.statusCode}');
+    cities.value = []; // Clear the cities list if the fetch fails
+  }
+  isLoadingWeather.value = false;
+}
+  Future<void> fetchWeatherData() async {
+    isLoadingWeather.value = true;
+    final response = await http.get(Uri.parse(
+        'https://cuaca-gempa-rest-api.vercel.app/weather/${selectedProvince.value.toLowerCase().replaceAll(' ', '-')}/${selectedCity.value.toLowerCase().replaceAll(' ', '-')}'));
+
+    if (response.statusCode == 200) {
+      weatherData.value = json.decode(response.body)['data'];
+    } else {
+      print('Failed to load weather data');
+    }
+    isLoadingWeather.value = false;
+  }
+
+  void changeProvince(String province) {
+  selectedProvince.value = province;
+  selectedCity.value = ''; // Clear the selected city
+  fetchCities();
+  savePreferences();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  void changeCity(String city) {
+    selectedCity.value = city;
+    fetchWeatherData();
+    savePreferences();
   }
+}
+
+class WeatherHomePage extends StatelessWidget {
+  final WeatherController controller = Get.put(WeatherController());
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.deepPurple.shade400, Colors.blue.shade300],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              _buildHeader(),
+              Expanded(
+                child: Obx(() {
+                  if (controller.isLoadingWeather.value) {
+                    return Center(child: CircularProgressIndicator());
+                  } else if (controller.weatherData.value.isEmpty) {
+                    return Center(child: Text('No data available'));
+                  } else {
+                    return Column(
+                      children: [
+                        lottieImage(),
+                        _buildCurrentWeather(),
+                        Container(
+                          
+                          child: _buildHourlyForecast(),
+                        )
+
+                        //add padding
+                      ],
+                    );
+                  }
+                }),
+              ),
+            ],
+          ),
+        ),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+    );
+  }
+
+  Widget lottieImage() {
+    return Lottie.asset('assets/weather.json', width: 200);
+  }
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+         Obx(() => DropdownButton<String>(
+  isExpanded: true,
+  alignment: AlignmentDirectional.centerStart,
+  autofocus: true,
+  underline: Container(),
+  icon: Icon(Icons.keyboard_arrow_down, color: Colors.white),
+  dropdownColor: Colors.white,
+  value: controller.provinces.contains(controller.selectedProvince.value) 
+      ? controller.selectedProvince.value 
+      : (controller.provinces.isNotEmpty ? controller.provinces.first : null),
+  items: controller.provinces.map((String province) {
+    return DropdownMenuItem<String>(
+      value: province,
+      child: Text(province),
+    );
+  }).toList(),
+  onChanged: (String? newValue) {
+    if (newValue != null) {
+      controller.changeProvince(newValue);
+    }
+  },
+)),
+       Obx(
+  () => controller.isLoadingCities.value
+      ? CircularProgressIndicator()
+      : DropdownButton<String>(
+          isExpanded: true,
+          alignment: AlignmentDirectional.centerStart,
+          icon: Icon(Icons.keyboard_arrow_down, color: Colors.white),
+          dropdownColor: Colors.white,
+          underline: Container(),
+          value: controller.cities.contains(controller.selectedCity.value)
+              ? controller.selectedCity.value
+              : (controller.cities.isNotEmpty ? controller.cities.first : null),
+          items: controller.cities.map((String city) {
+            return DropdownMenuItem<String>(
+              value: city,
+              child: Text(city),
+            );
+          }).toList(),
+          onChanged: (String? newValue) {
+            if (newValue != null) {
+              controller.changeCity(newValue);
+            }
+          },
+        ),
+),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCurrentWeather() {
+    return Obx(() {
+      final weatherData = controller.weatherData.value;
+      final currentWeather =
+          weatherData['params'].firstWhere((param) => param['id'] == 'weather');
+      final currentTemp =
+          weatherData['params'].firstWhere((param) => param['id'] == 't');
+      final currentTime = DateTime.now();
+
+      return Expanded(
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
           mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+          children: [
+            Text(
+              '${currentTemp['times'][0]['celcius']}',
+              style: TextStyle(fontSize: 72, fontWeight: FontWeight.bold),
             ),
             Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+              currentWeather['times'][0]['name'],
+              style: TextStyle(fontSize: 24),
+            ),
+            Text(
+              '${DateFormat('EEEE, d MMMM').format(currentTime)}',
+              style: TextStyle(fontSize: 18),
             ),
           ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
-    );
+      );
+    });
+  }
+
+  String _parseIssueDate(String timestamp) {
+    try {
+      String datePart = timestamp.substring(0, 8);
+      String timePart = timestamp.substring(8, 12);
+      String formattedString = datePart +
+          "T" +
+          timePart.substring(0, 2) +
+          ":" +
+          timePart.substring(2, 4);
+      DateTime dateTime = DateTime.parse(formattedString);
+      return DateFormat('HH:mm').format(dateTime);
+    } catch (e) {
+      print('Failed to parse issue date: $e');
+      return '';
+    }
+  }
+
+  Widget _buildHourlyForecast() {
+    return Obx(() {
+      final weatherData = controller.weatherData.value;
+      final hourlyWeather =
+          weatherData['params'].firstWhere((param) => param['id'] == 'weather');
+      final hourlyTemp =
+          weatherData['params'].firstWhere((param) => param['id'] == 't');
+
+      return Container(
+     decoration: BoxDecoration(
+       borderRadius: BorderRadius.circular(16.0),
+     ),
+        height: 140,
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: hourlyWeather['times'].length,
+            itemBuilder: (context, index) {
+              final weather = hourlyWeather['times'][index];
+              final temp = hourlyTemp['times'][index];
+              final time = _parseIssueDate(weather['datetime']);
+              return Card(
+               
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      Text(time),
+                      Icon(getWeatherIcon(weather['code'])),
+                      Text('${temp['celcius']}'),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    });
+  }
+
+  IconData getWeatherIcon(String code) {
+    switch (code) {
+      case '0':
+        return Icons.wb_sunny;
+      case '1':
+        return Icons.beach_access;
+      case '2':
+        return Icons.wb_cloudy;
+      case '3':
+      return Icons.cloud;
+      case '4':
+        return Icons.cloud;
+      default:
+        return Icons.wb_cloudy;
+    }
   }
 }
